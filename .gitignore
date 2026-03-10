@@ -1,0 +1,67 @@
+# ============================================
+# WAVESPOT .gitignore
+# ============================================
+
+# === 환경변수 (절대 커밋 금지!) ===
+.env
+.env.local
+.env.*.local
+# 하위 디렉토리 .env도 명시적으로 제외
+apps/api/.env
+apps/admin-web/.env
+apps/mobile/.env
+
+# === Node.js ===
+node_modules/
+dist/
+build/
+.npm
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# === NestJS ===
+apps/api/dist/
+apps/api/node_modules/
+apps/admin-web/.next/
+apps/admin-web/node_modules/
+apps/admin-web/out/
+
+# === Flutter / Dart ===
+apps/mobile/.dart_tool/
+apps/mobile/.packages
+apps/mobile/build/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+# pubspec.lock 은 버전 고정을 위해 커밋함 (Mac/Linux 팀 협업 필수)
+# apps/mobile/pubspec.lock  ← 커밋 대상
+*.g.dart
+*.freezed.dart
+
+# === IDE ===
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === OS ===
+__MACOSX/
+._*
+
+# === Docker ===
+docker-compose.override.yml
+
+# === Terraform ===
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+
+# === 기타 ===
+coverage/
+*.tgz
+.cache/

@@ -1,0 +1,514 @@
+// ============================================
+// WAVESPOT Prisma Schema
+// TDD v1.1 Section 7 기반 전체 DB 스키마
+// PostgreSQL 16 + PostGIS 3.4
+// ============================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ============================================
+// Enums
+// ============================================
+
+enum Region {
+  east_sea
+  west_sea
+  south_sea
+  inland
+}
+
+enum BottomType {
+  sand
+  rock
+  coral
+  mud
+  mixed
+}
+
+enum Difficulty {
+  beginner
+  intermediate
+  advanced
+}
+
+enum Plan {
+  free
+  pro
+}
+
+enum Role {
+  user
+  admin
+}
+
+enum SkillLevel {
+  beginner
+  intermediate
+  advanced
+}
+
+enum UnitWind {
+  ms
+  knots
+  kmh
+}
+
+enum UnitWave {
+  m
+  ft
+}
+
+enum StationType {
+  aws
+  buoy
+  koem
+}
+
+enum Grade {
+  excellent
+  good
+  fair
+  poor
+}
+
+enum SpotRequestStatus {
+  pending
+  approved
+  rejected
+  duplicate
+}
+
+enum AlertSeverity {
+  advisory   // 주의보
+  warning    // 경보
+}
+
+enum PaymentMethod {
+  apple_iap
+  google_iap
+  portone
+}
+
+enum SubscriptionStatus {
+  active
+  expired
+  cancelled
+}
+
+// ============================================
+// 1. users — 회원 (TDD 7.1)
+// ============================================
+
+model User {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String     @unique @db.VarChar(255)
+  nickname   String     @db.VarChar(50)
+  avatarUrl  String?    @map("avatar_url")
+  role       Role       @default(user)
+  plan       Plan       @default(free)
+  skillLevel SkillLevel @default(beginner) @map("skill_level")
+  unitWind   UnitWind   @default(ms) @map("unit_wind")
+  unitWave   UnitWave   @default(m) @map("unit_wave")
+  darkMode   Boolean    @default(false) @map("dark_mode")
+  fcmToken   String?    @map("fcm_token")
+
+  // 소셜 로그인 ID
+  kakaoId  String? @unique @map("kakao_id") @db.VarChar(100)
+  appleId  String? @unique @map("apple_id") @db.VarChar(100)
+  googleId String? @unique @map("google_id") @db.VarChar(100)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at") // 소프트 삭제
+
+  // Relations
+  subscriptions    Subscription[]
+  favorites        Favorite[]
+  alertSettings    AlertSetting[]
+  communityReports CommunityReport[]
+  reviews          Review[]
+  spotRequests     SpotRequest[]
+
+  @@map("users")
+}
+
+// ============================================
+// 2. subscriptions — 구독 이력
+// ============================================
+
+model Subscription {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String             @map("user_id") @db.Uuid
+  plan          Plan
+  status        SubscriptionStatus @default(active)
+  paymentMethod PaymentMethod      @map("payment_method")
+  transactionId String?            @map("transaction_id") @db.VarChar(255) // IAP/PG 거래 ID
+  startedAt     DateTime           @default(now()) @map("started_at")
+  expiresAt     DateTime           @map("expires_at")
+  cancelledAt   DateTime?          @map("cancelled_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+// ============================================
+// 3. spots — 스팟 마스터 (TDD 7.2, SRS v1.3)
+// ============================================
+
+model Spot {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name     String @db.VarChar(100)
+  // name_en 삭제 — 한국 서비스 전용
+
+  // PostGIS 좌표: Prisma에서 Unsupported 타입으로 선언
+  // 좌표 INSERT/UPDATE → $executeRaw + ST_MakePoint()
+  // 좌표 SELECT → $queryRaw + ST_X(), ST_Y()
+  location Unsupported("geography(Point, 4326)")
+
+  address    String?    @db.VarChar(200)
+  region     Region
+  spotTypes  String[]   @map("spot_types") // [surfing, yacht, marina, waterski, kayak, diving, kitesurf, sup]
+  depthAvg   Float?     @map("depth_avg") // 평균 수심 (m)
+  bottomType BottomType? @map("bottom_type")
+  difficulty Difficulty
+
+  seasonStart Int? @map("season_start") @db.SmallInt // 권장 시즌 시작 월
+  seasonEnd   Int? @map("season_end") @db.SmallInt // 권장 시즌 종료 월
+
+  hazardNotes   String?  @map("hazard_notes") // 위험 요소 메모
+  coverImageUrl String?  @map("cover_image_url")
+  imageUrls     String[] @map("image_urls")
+  infoCards     Json[]   @map("info_cards") // 이미지+텍스트 카드 배열
+
+  // 마리나 전용 — marina 타입일 때만 사용, 나머지 null
+  // { operator, max_berths, max_vessel_length, max_vessel_draft,
+  //   yacht_rental, sailing_school, fuel_available, entry_fee_note }
+  marinaInfo Json? @map("marina_info")
+
+  // 예약·연락처 정보 (v1.3 신규)
+  homepageUrl         String?  @map("homepage_url")
+  reservationUrl      String?  @map("reservation_url")
+  phone               String?  @db.VarChar(20)
+  snsUrl              Json?    @map("sns_url") // {instagram, youtube, kakao_channel}
+  operatingHours      String?  @map("operating_hours") @db.VarChar(200)
+  closedDays          String?  @map("closed_days") @db.VarChar(100)
+  priceInfo           String?  @map("price_info")
+  reservationRequired Boolean  @default(false) @map("reservation_required")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  amenity              SpotAmenity?
+  weatherSnapshots     WeatherSnapshot[]
+  observationSnapshots ObservationSnapshot[]
+  activityScores       ActivityScore[]
+  tides                Tide[]
+  weatherAlerts        WeatherAlert[]
+  favorites            Favorite[]
+  communityReports     CommunityReport[]
+  reviews              Review[]
+  spotSources          SpotSource[]
+
+  @@map("spots")
+}
+
+// ============================================
+// 3-1. spot_amenities — 스팟 편의시설 (1:1)
+// ============================================
+
+model SpotAmenity {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  spotId String @unique @map("spot_id") @db.Uuid
+
+  // 편의시설 여부
+  hasParking        Boolean @default(false) @map("has_parking")
+  hasShower         Boolean @default(false) @map("has_shower")
+  hasEquipmentRental Boolean @default(false) @map("has_equipment_rental")
+  hasDocking        Boolean @default(false) @map("has_docking")
+  hasRescueStation  Boolean @default(false) @map("has_rescue_station")
+  hasRestroom       Boolean @default(false) @map("has_restroom")
+  hasRestaurant     Boolean @default(false) @map("has_restaurant")
+  hasAccommodation  Boolean @default(false) @map("has_accommodation")
+  hasWifi           Boolean @default(false) @map("has_wifi")
+  hasLocker         Boolean @default(false) @map("has_locker")
+  hasCctv           Boolean @default(false) @map("has_cctv")
+  hasFirstAid       Boolean @default(false) @map("has_first_aid")
+
+  // 상세 메모
+  parkingNote String? @map("parking_note")  // 유료/무료, 수용 대수 등
+  rentalNote  String? @map("rental_note")   // 대여 품목 및 가격
+  notes       String?                       // 기타 편의시설 메모
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@map("spot_amenities")
+}
+
+// ============================================
+// 4. spot_source — 공공데이터 출처 매핑
+// ============================================
+
+model SpotSource {
+  id             String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  spotId         String @map("spot_id") @db.Uuid
+  sourceName     String @map("source_name") @db.VarChar(100) // 해양경찰청, 관광공사 등
+  sourceId       String @map("source_id") @db.VarChar(200) // 원본 데이터 ID
+  sourceUrl      String? @map("source_url") // 원본 데이터 URL
+  importedAt     DateTime @default(now()) @map("imported_at")
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@unique([sourceName, sourceId])
+  @@index([spotId])
+  @@map("spot_sources")
+}
+
+// ============================================
+// 5. spot_requests — 유저 스팟 추가 요청 (TDD 3.6)
+// ============================================
+
+model SpotRequest {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
+  name        String            @db.VarChar(100) // 요청 스팟명
+  latitude    Float             // 요청 위치 위도
+  longitude   Float             // 요청 위치 경도
+  spotTypes   String[]          @map("spot_types")
+  description String?           // 설명
+  imageUrls   String[]          @map("image_urls") // 사진 최대 3장
+  status      SpotRequestStatus @default(pending)
+  rejectReason String?          @map("reject_reason") // 반려 사유
+  linkedSpotId String?          @map("linked_spot_id") @db.Uuid // 승인 시 연결된 스팟 ID
+  reviewedAt   DateTime?        @map("reviewed_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@map("spot_requests")
+}
+
+// ============================================
+// 6. weather_snapshots — 기상 예보 데이터 (TDD 7.3)
+// 파티셔닝 권장: RANGE by recorded_at (월별)
+// ============================================
+
+model WeatherSnapshot {
+  id            BigInt   @id @default(autoincrement())
+  spotId        String   @map("spot_id") @db.Uuid
+  recordedAt    DateTime @map("recorded_at") // 기상 기준 시각
+
+  // 기상 항목
+  windSpeed     Float?   @map("wind_speed")     // 풍속 m/s
+  windDirection Int?     @map("wind_direction") @db.SmallInt // 풍향 0~360°
+  windGust      Float?   @map("wind_gust")      // 돌풍 m/s
+  waveHeightSig Float?   @map("wave_height_sig") // 유의 파고 m
+  waveHeightMax Float?   @map("wave_height_max") // 최대 파고 m
+  wavePeriod    Float?   @map("wave_period")    // 파주기 초
+  waveDirection Int?     @map("wave_direction") @db.SmallInt // 파향 degree
+  swellHeight   Float?   @map("swell_height")   // 너울 높이 m
+  swellPeriod   Float?   @map("swell_period")   // 너울 주기 초
+  swellDirection Int?    @map("swell_direction") @db.SmallInt // 너울 방향 degree
+  seaTemp       Float?   @map("sea_temp")       // 수온 °C
+  airTemp       Float?   @map("air_temp")       // 기온 °C
+  feelsLike     Float?   @map("feels_like")     // 체감온도 °C
+  precipitation Float?   // 강수량 mm/h
+  precipProb    Int?     @map("precip_prob") @db.SmallInt // 강수확률 %
+  visibility    Float?   // 시정 km
+  uvIndex       Float?   @map("uv_index")       // 자외선 지수
+  weatherCode   Int?     @map("weather_code") @db.SmallInt // WMO 날씨 코드
+
+  source String? @db.VarChar(50) // 데이터 출처 (kma/openmeteo/stormglass)
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, recordedAt])
+  @@map("weather_snapshots")
+}
+
+// ============================================
+// 7. observation_snapshots — 관측소 실시간 데이터 (SRS 9.3)
+// ============================================
+
+model ObservationSnapshot {
+  id            BigInt      @id @default(autoincrement())
+  spotId        String      @map("spot_id") @db.Uuid
+  stationId     String      @map("station_id") @db.VarChar(50)  // 관측소 코드
+  stationName   String      @map("station_name") @db.VarChar(100)
+  stationType   StationType @map("station_type") // aws / buoy / koem
+  distanceKm    Float       @map("distance_km") // 스팟과의 거리 (km)
+  observedAt    DateTime    @map("observed_at") // 관측 시각
+
+  // 실측 데이터
+  windSpeed     Float?      @map("wind_speed")     // 실측 풍속 m/s
+  windDirection Int?        @map("wind_direction") @db.SmallInt // 실측 풍향 degree
+  waveHeight    Float?      @map("wave_height")    // 실측 파고 m (부이 전용)
+  seaTemp       Float?      @map("sea_temp")       // 실측 수온 °C
+  airTemp       Float?      @map("air_temp")       // 실측 기온 °C
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, observedAt])
+  @@map("observation_snapshots")
+}
+
+// ============================================
+// 8. activity_scores — 활동 지수 (TDD 7.4)
+// ============================================
+
+model ActivityScore {
+  id             BigInt   @id @default(autoincrement())
+  spotId         String   @map("spot_id") @db.Uuid
+  sport          String   @db.VarChar(30) // surfing/yacht/waterski/kayak/diving/kitesurf/sup
+  scoredAt       DateTime @map("scored_at") // 점수 기준 시각
+  score          Int      @db.SmallInt // 0~100
+  grade          Grade    // excellent/good/fair/poor
+  simpleMessage  String?  @map("simple_message") // Simple View 자연어 메시지 (한국어)
+  bestTimeStart  DateTime? @map("best_time_start") // 오늘 최적 시간대 시작
+  bestTimeEnd    DateTime? @map("best_time_end")   // 오늘 최적 시간대 종료
+  penaltyApplied Boolean  @default(false) @map("penalty_applied") // 안전 패널티
+  alertOverride  Boolean  @default(false) @map("alert_override")  // 기상특보 강제 POOR
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, sport, scoredAt])
+  @@map("activity_scores")
+}
+
+// ============================================
+// 9. tides — 조석 예보
+// ============================================
+
+model Tide {
+  id          BigInt   @id @default(autoincrement())
+  spotId      String   @map("spot_id") @db.Uuid
+  tideType    String   @map("tide_type") @db.VarChar(10) // high / low
+  predictedAt DateTime @map("predicted_at") // 고·저조 시각
+  heightCm    Float    @map("height_cm") // 조위 cm
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, predictedAt])
+  @@map("tides")
+}
+
+// ============================================
+// 10. weather_alerts — 기상특보
+// ============================================
+
+model WeatherAlert {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  spotId      String        @map("spot_id") @db.Uuid
+  alertType   String        @map("alert_type") @db.VarChar(50) // 태풍, 강풍, 풍랑, 호우 등
+  severity    AlertSeverity // advisory(주의보) / warning(경보)
+  title       String        @db.VarChar(200)
+  description String?
+  issuedAt    DateTime      @map("issued_at") // 발령 시각
+  liftedAt    DateTime?     @map("lifted_at") // 해제 시각
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, isActive])
+  @@map("weather_alerts")
+}
+
+// ============================================
+// 11. favorites — 즐겨찾기 (Free 최대 2개)
+// ============================================
+
+model Favorite {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  spotId    String   @map("spot_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@unique([userId, spotId])
+  @@index([userId])
+  @@map("favorites")
+}
+
+// ============================================
+// 12. alert_settings — 알림 설정 (Pro)
+// ============================================
+
+model AlertSetting {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  spotId       String   @map("spot_id") @db.Uuid
+  sport        String   @db.VarChar(30) // 종목
+  targetGrades Grade[]  @map("target_grades") // 알림 받을 등급 배열
+  conditions   Json?    // 종목별 세부 조건 조합
+  quietStart   String?  @map("quiet_start") @db.VarChar(5) // "22:00"
+  quietEnd     String?  @map("quiet_end") @db.VarChar(5)   // "07:00"
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([spotId, sport])
+  @@map("alert_settings")
+}
+
+// ============================================
+// 13. community_reports — 커뮤니티 리포트
+// ============================================
+
+model CommunityReport {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  spotId    String   @map("spot_id") @db.Uuid
+  content   String
+  imageUrls String[] @map("image_urls")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@index([spotId, createdAt(sort: Desc)])
+  @@map("community_reports")
+}
+
+// ============================================
+// 14. reviews — 스팟 리뷰
+// ============================================
+
+model Review {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  spotId    String   @map("spot_id") @db.Uuid
+  rating    Int      @db.SmallInt // 1~5
+  content   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+  spot Spot @relation(fields: [spotId], references: [id])
+
+  @@unique([userId, spotId]) // 유저당 스팟 1리뷰
+  @@index([spotId])
+  @@map("reviews")
+}
