@@ -1,122 +1,341 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-void main() {
-  runApp(const MyApp());
+// ============================================================
+// WAVESPOT 디자인 토큰 (TDD v1.1 Section 1 기반)
+// ============================================================
+class WavespotColors {
+  static const oceanBlue = Color(0xFF0C3B6E);
+  static const waveCyan  = Color(0xFF07C0D4);
+  static const seaSand   = Color(0xFFF0EDE5);
+
+  static const backgroundLight = seaSand;
+  static const surfaceLight     = Color(0xFFFFFFFF);
+  static const textSecondary    = Color(0xFF64748B);
+
+  static const backgroundDark  = Color(0xFF0D1B2A);
+  static const surfaceDark     = Color(0xFF1A2E44);
+  static const primaryDark     = Color(0xFF3B82F6);
+  static const textPrimaryDark = Color(0xFFF1F5F9);
+
+  static const excellent = Color(0xFF10B981);
+  static const good      = Color(0xFF3B82F6);
+  static const fair      = Color(0xFFF59E0B);
+  static const poor      = Color(0xFFEF4444);
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+// ============================================================
+// 라우터 설정
+// ============================================================
+final _router = GoRouter(
+  initialLocation: '/splash',
+  routes: [
+    GoRoute(
+      path: '/splash',
+      builder: (context, state) => const SplashScreen(),
+    ),
+    GoRoute(
+      path: '/map',
+      builder: (context, state) => const MapPlaceholderScreen(),
+    ),
+  ],
+);
 
-  // This widget is the root of your application.
+// ============================================================
+// 앱 진입점
+// ============================================================
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
+
+  runApp(
+    const ProviderScope(
+      child: WavespotApp(),
+    ),
+  );
+}
+
+// ============================================================
+// 루트 앱 위젯
+// ============================================================
+class WavespotApp extends StatelessWidget {
+  const WavespotApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+    return MaterialApp.router(
+      title: 'WAVESPOT',
+      debugShowCheckedModeBanner: false,
+      routerConfig: _router,
+      theme: _buildLightTheme(),
+      darkTheme: _buildDarkTheme(),
+      themeMode: ThemeMode.system,
+    );
+  }
+
+  ThemeData _buildLightTheme() {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: WavespotColors.oceanBlue,
+        brightness: Brightness.light,
+        primary: WavespotColors.oceanBlue,
+        secondary: WavespotColors.waveCyan,
+        surface: WavespotColors.seaSand,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      scaffoldBackgroundColor: WavespotColors.seaSand,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: WavespotColors.oceanBlue,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        titleTextStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: WavespotColors.oceanBlue,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        ),
+      ),
+    );
+  }
+
+  ThemeData _buildDarkTheme() {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: WavespotColors.oceanBlue,
+        brightness: Brightness.dark,
+        primary: WavespotColors.primaryDark,
+        secondary: WavespotColors.waveCyan,
+        surface: WavespotColors.surfaceDark,
+      ),
+      scaffoldBackgroundColor: WavespotColors.backgroundDark,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: WavespotColors.surfaceDark,
+        foregroundColor: WavespotColors.textPrimaryDark,
+        elevation: 0,
+        centerTitle: true,
+      ),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+// ============================================================
+// 스플래시 화면 (S-01)
+// ============================================================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+    );
+    _scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+    );
+
+    _controller.forward();
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) context.go('/map');
     });
   }
 
   @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    return Scaffold(
+      backgroundColor: WavespotColors.oceanBlue,
+      body: Center(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: ScaleTransition(
+            scale: _scaleAnimation,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: WavespotColors.waveCyan,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: WavespotColors.waveCyan.withOpacity(0.4),
+                        blurRadius: 24,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.waves, size: 56, color: Colors.white),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'WAVESPOT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '수상 스포츠 컨디션, 한눈에',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.75),
+                    fontSize: 15,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 메인 지도 화면 플레이스홀더 (S-03)
+// Phase 1 MVP: 네이버 지도 + 스팟 마커 + 바텀시트 구현 예정
+// ============================================================
+class MapPlaceholderScreen extends StatelessWidget {
+  const MapPlaceholderScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('WAVESPOT'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            onPressed: () {},
+            tooltip: '마이페이지',
+          ),
+        ],
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            Icon(
+              Icons.map_outlined,
+              size: 80,
+              color: WavespotColors.waveCyan.withOpacity(0.5),
             ),
+            const SizedBox(height: 20),
+            const Text(
+              '🌊 지도 화면',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '네이버 지도 API 키 설정 후 활성화됩니다.\nPhase 1 MVP 구현 예정',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: WavespotColors.textSecondary),
+            ),
+            const SizedBox(height: 32),
+            _buildGradeRow(),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: 0,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: '지도',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.favorite_outline),
+            selectedIcon: Icon(Icons.favorite),
+            label: '즐겨찾기',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: '커뮤니티',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: '마이',
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildGradeRow() {
+    final grades = [
+      ('EXCELLENT', WavespotColors.excellent),
+      ('GOOD', WavespotColors.good),
+      ('FAIR', WavespotColors.fair),
+      ('POOR', WavespotColors.poor),
+    ];
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: grades.map((g) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Chip(
+            backgroundColor: g.$2.withOpacity(0.15),
+            side: BorderSide(color: g.$2, width: 1.5),
+            label: Text(
+              g.$1,
+              style: TextStyle(
+                color: g.$2,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
