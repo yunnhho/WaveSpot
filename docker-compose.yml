@@ -1,5 +1,7 @@
 # WAVESPOT 개발 환경 Docker Compose
-# PostGIS (PostgreSQL + 지리 확장) + Redis
+# PostGIS (PostgreSQL 16 + PostGIS 3.4) + Redis 7
+# 사용: docker-compose up -d
+# DB 접속: postgresql://wavespot:wavespot_dev_2026@localhost:5433/wavespot
 version: '3.8'
 
 services:
@@ -7,13 +9,20 @@ services:
     image: postgis/postgis:16-3.4
     container_name: wavespot-db
     ports:
-      - "5433:5432"
+      - "5433:5432"   # 외부:5433 → 컨테이너 내부:5432
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: wavespot
-      POSTGRES_PASSWORD: wavespot_dev_2026
-      POSTGRES_DB: wavespot
+      POSTGRES_USER: ${POSTGRES_USER:-wavespot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wavespot_dev_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-wavespot}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wavespot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -21,6 +30,11 @@ services:
     ports:
       - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pgdata:
