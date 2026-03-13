@@ -2,7 +2,6 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
-  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -27,13 +26,21 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    @InjectRedis() private readonly redis: Redis,
   ) {}
 
   /**
    * 개발용 이메일 로그인 (실제 소셜 로그인 키 없이 테스트 가능)
+   * NODE_ENV=production에서는 비활성화
    */
   async devLogin(email: string, password: string) {
-    // 개발용: password는 'dev_' + email 앞 4자리면 통과
+    if (this.config.get('app.nodeEnv') === 'production') {
+      throw new BadRequestException({
+        code: 'AUTH_SOCIAL_FAILED',
+        message: '개발용 로그인은 프로덕션에서 사용할 수 없습니다.',
+      });
+    }
+
     const expectedPassword = `dev_${email.slice(0, 4)}`;
     if (password !== expectedPassword && password !== 'wavespot2026') {
       throw new UnauthorizedException({
@@ -56,21 +63,26 @@ export class AuthService {
 
   /**
    * 카카오 소셜 로그인
-   * TODO: KAKAO_CLIENT_ID 발급 후 실제 검증 활성화
+   * KAKAO_CLIENT_ID 발급 후 플레이스홀더({KAKAO_CLIENT_ID}) 교체 시 실제 검증 활성화
    */
   async kakaoLogin(accessToken: string) {
-    const kakaoClientId = this.config.get('app.external.kakaoClientId');
+    const kakaoClientId = this.config.get<string>('app.social.kakaoClientId');
 
     if (!kakaoClientId || kakaoClientId.startsWith('{')) {
-      // 플레이스홀더 상태 → Mock 처리
+      // 플레이스홀더 상태 → 개발용 Mock 처리
+      this.logger.warn('KAKAO_CLIENT_ID가 설정되지 않아 Mock 로그인 처리됩니다.');
       return this.mockSocialLogin('kakao', accessToken);
     }
 
-    // 실제 카카오 API 검증
     try {
       const response = await fetch('https://kapi.kakao.com/v2/user/me', {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+
+      if (!response.ok) {
+        throw new Error(`Kakao API error: ${response.status}`);
+      }
+
       const data = await response.json() as any;
       const kakaoId = String(data.id);
       const email = data.kakao_account?.email;
@@ -79,32 +91,54 @@ export class AuthService {
       const user = await this.prisma.user.upsert({
         where: { kakaoId },
         update: {},
-        create: { email: email || `kakao_${kakaoId}@wavespot.kr`, nickname, kakaoId },
+        create: {
+          email: email || `kakao_${kakaoId}@wavespot.kr`,
+          nickname,
+          kakaoId,
+        },
       });
 
       return this.generateTokens(user);
     } catch (e) {
-      throw new UnauthorizedException({ code: 'AUTH_SOCIAL_FAILED', message: '카카오 로그인에 실패했습니다.' });
+      this.logger.error(`Kakao login failed: ${e.message}`);
+      throw new UnauthorizedException({
+        code: 'AUTH_SOCIAL_FAILED',
+        message: '카카오 로그인에 실패했습니다.',
+      });
     }
   }
 
   /**
    * 구글 소셜 로그인
-   * TODO: GOOGLE_CLIENT_ID 발급 후 실제 검증 활성화
+   * GOOGLE_CLIENT_ID 발급 후 플레이스홀더 교체 시 실제 검증 활성화
    */
   async googleLogin(accessToken: string) {
-    const googleClientId = this.config.get('app.external.googleClientId');
+    const googleClientId = this.config.get<string>('app.social.googleClientId');
 
     if (!googleClientId || googleClientId.startsWith('{')) {
+      this.logger.warn('GOOGLE_CLIENT_ID가 설정되지 않아 Mock 로그인 처리됩니다.');
       return this.mockSocialLogin('google', accessToken);
     }
 
     try {
-      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
+      const response = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(`Google API error: ${response.status}`);
+      }
+
       const data = await response.json() as any;
+
+      // aud 검증 — 다른 앱의 토큰으로 인증 방지
+      if (data.aud !== googleClientId) {
+        throw new Error('Invalid token audience');
+      }
+
       const googleId = data.sub;
       const email = data.email;
-      const nickname = data.name || `google_${googleId}`;
+      const nickname = data.name || `google_${googleId.slice(0, 8)}`;
 
       const user = await this.prisma.user.upsert({
         where: { googleId },
@@ -114,27 +148,35 @@ export class AuthService {
 
       return this.generateTokens(user);
     } catch (e) {
-      throw new UnauthorizedException({ code: 'AUTH_SOCIAL_FAILED', message: '구글 로그인에 실패했습니다.' });
+      this.logger.error(`Google login failed: ${e.message}`);
+      throw new UnauthorizedException({
+        code: 'AUTH_SOCIAL_FAILED',
+        message: '구글 로그인에 실패했습니다.',
+      });
     }
   }
 
   /**
    * 애플 소셜 로그인
-   * TODO: APPLE_CLIENT_ID 발급 후 실제 검증 활성화
+   * APPLE_CLIENT_ID 발급 후 플레이스홀더 교체 시 구현 완성 필요
    */
   async appleLogin(accessToken: string) {
-    const appleClientId = this.config.get('app.external.appleClientId');
+    const appleClientId = this.config.get<string>('app.social.appleClientId');
 
     if (!appleClientId || appleClientId.startsWith('{')) {
+      this.logger.warn('APPLE_CLIENT_ID가 설정되지 않아 Mock 로그인 처리됩니다.');
       return this.mockSocialLogin('apple', accessToken);
     }
 
-    // Apple ID Token 검증 (실제 구현 시 apple-auth 라이브러리 사용)
-    throw new BadRequestException({ code: 'AUTH_SOCIAL_FAILED', message: '애플 로그인 키가 설정되지 않았습니다.' });
+    // TODO: apple-auth 라이브러리로 ID Token 검증 구현 (키 발급 후 활성화)
+    throw new BadRequestException({
+      code: 'AUTH_SOCIAL_FAILED',
+      message: '애플 로그인 키 설정을 완료한 후 사용 가능합니다.',
+    });
   }
 
   /**
-   * Mock 소셜 로그인 (플레이스홀더 상태에서 테스트용)
+   * Mock 소셜 로그인 (API 키 미설정 개발 환경 전용)
    */
   private async mockSocialLogin(provider: string, token: string) {
     const mockEmail = `mock_${provider}_${token.slice(-8)}@wavespot.kr`;
@@ -150,17 +192,23 @@ export class AuthService {
   }
 
   /**
-   * Refresh Token으로 Access Token 갱신
+   * Refresh Token으로 Access Token 갱신 (Token Rotation)
    */
   async refresh(refreshToken: string) {
     const userId = await this.getRefreshTokenOwner(refreshToken);
     if (!userId) {
-      throw new UnauthorizedException({ code: 'AUTH_REFRESH_EXPIRED', message: 'Refresh Token이 만료되었습니다.' });
+      throw new UnauthorizedException({
+        code: 'AUTH_REFRESH_EXPIRED',
+        message: 'Refresh Token이 만료되었거나 유효하지 않습니다.',
+      });
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      throw new UnauthorizedException({ code: 'AUTH_TOKEN_INVALID', message: '사용자를 찾을 수 없습니다.' });
+      throw new UnauthorizedException({
+        code: 'AUTH_TOKEN_INVALID',
+        message: '사용자를 찾을 수 없습니다.',
+      });
     }
 
     // 기존 RT 무효화 후 새 토큰 발급 (Rotation)
@@ -169,17 +217,15 @@ export class AuthService {
   }
 
   /**
-   * 로그아웃 — Refresh Token 삭제
+   * 로그아웃 — 해당 사용자의 모든 Refresh Token 삭제
    */
   async logout(userId: string) {
-    const key = `refresh_tokens:${userId}`;
-    // Redis에 저장된 모든 refreshToken 키 삭제
-    const count = await this.deleteAllRefreshTokens(userId);
-    return { success: true, message: '로그아웃되었습니다.' };
+    await this.deleteAllRefreshTokens(userId);
+    return { message: '로그아웃되었습니다.' };
   }
 
   /**
-   * JWT + Refresh Token 생성
+   * JWT Access Token + Refresh Token 생성
    */
   async generateTokens(user: any) {
     const payload: JwtPayload = {
@@ -189,51 +235,82 @@ export class AuthService {
       role: user.role,
     };
 
-    const accessToken = this.jwtService.sign(payload);
+    const secret = this.config.get<string>('app.jwt.secret');
+    const expiresIn = this.config.get<string>('app.jwt.expiresIn') || '1h';
+    const refreshTtlStr = this.config.get<string>('app.jwt.refreshExpiresIn') || '30d';
+
+    const accessToken = this.jwtService.sign(payload, { secret, expiresIn });
     const refreshToken = uuidv4();
 
-    // Redis에 refreshToken 저장 (TTL: 30일)
-    await this.storeRefreshToken(user.id, refreshToken, 30 * 24 * 60 * 60);
+    const refreshTtlSeconds = this.parseTtlToSeconds(refreshTtlStr);
+    await this.storeRefreshToken(user.id, refreshToken, refreshTtlSeconds);
 
-    return { accessToken, refreshToken, user: { id: user.id, email: user.email, plan: user.plan, role: user.role, nickname: user.nickname } };
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        plan: user.plan,
+        role: user.role,
+        nickname: user.nickname,
+      },
+    };
   }
 
+  // ============================================================
+  // Redis Refresh Token 관리
+  // 키 구조: rt:{token} → userId (TTL: 30일)
+  //          rt_user:{userId} → Set<token> (사용자별 토큰 추적)
+  // ============================================================
+
   private async storeRefreshToken(userId: string, token: string, ttlSeconds: number) {
-    // Redis 없으면 메모리 폴백 (개발용)
-    try {
-      const { createClient } = await import('redis');
-    } catch {}
-    // 간단 구현: token → userId 매핑
-    const key = `rt:${token}`;
-    // ioredis 직접 사용 대신 메모리 스토어
-    AuthService.tokenStore.set(token, { userId, expiresAt: Date.now() + ttlSeconds * 1000 });
+    const tokenKey = `rt:${token}`;
+    const userTokensKey = `rt_user:${userId}`;
+
+    const pipeline = this.redis.pipeline();
+    pipeline.set(tokenKey, userId, 'EX', ttlSeconds);
+    pipeline.sadd(userTokensKey, token);
+    pipeline.expire(userTokensKey, ttlSeconds);
+    await pipeline.exec();
   }
 
   private async getRefreshTokenOwner(token: string): Promise<string | null> {
-    const stored = AuthService.tokenStore.get(token);
-    if (!stored) return null;
-    if (stored.expiresAt < Date.now()) {
-      AuthService.tokenStore.delete(token);
-      return null;
-    }
-    return stored.userId;
+    return this.redis.get(`rt:${token}`);
   }
 
   private async deleteRefreshToken(token: string) {
-    AuthService.tokenStore.delete(token);
+    const userId = await this.redis.get(`rt:${token}`);
+    if (userId) {
+      const pipeline = this.redis.pipeline();
+      pipeline.del(`rt:${token}`);
+      pipeline.srem(`rt_user:${userId}`, token);
+      await pipeline.exec();
+    }
   }
 
   private async deleteAllRefreshTokens(userId: string) {
-    let count = 0;
-    for (const [token, data] of AuthService.tokenStore.entries()) {
-      if (data.userId === userId) {
-        AuthService.tokenStore.delete(token);
-        count++;
-      }
+    const userTokensKey = `rt_user:${userId}`;
+    const tokens = await this.redis.smembers(userTokensKey);
+
+    if (tokens.length > 0) {
+      const pipeline = this.redis.pipeline();
+      tokens.forEach((token) => pipeline.del(`rt:${token}`));
+      pipeline.del(userTokensKey);
+      await pipeline.exec();
     }
-    return count;
   }
 
-  // 개발용 메모리 토큰 스토어 (프로덕션에서는 Redis 사용)
-  private static tokenStore = new Map<string, { userId: string; expiresAt: number }>();
+  private parseTtlToSeconds(ttl: string): number {
+    const match = ttl.match(/^(\d+)([dhms])$/);
+    if (!match) return 30 * 24 * 60 * 60; // 기본 30일
+    const value = parseInt(match[1], 10);
+    switch (match[2]) {
+      case 'd': return value * 24 * 60 * 60;
+      case 'h': return value * 60 * 60;
+      case 'm': return value * 60;
+      case 's': return value;
+      default:  return 30 * 24 * 60 * 60;
+    }
+  }
 }
