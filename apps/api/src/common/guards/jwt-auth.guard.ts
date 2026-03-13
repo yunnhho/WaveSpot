@@ -5,8 +5,6 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
@@ -17,11 +15,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly jwtService: JwtService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     // @Public() 데코레이터 체크
@@ -47,26 +41,15 @@ export class JwtAuthGuard implements CanActivate {
     if (type !== 'Bearer' || !token) {
       throw new UnauthorizedException({
         code: 'AUTH_TOKEN_INVALID',
-        message: '유효하지 않은 토큰 형식입니다. Bearer {token} 형식으로 전송하세요.',
+        message: '유효하지 않은 토큰 형식입니다.',
       });
     }
 
-    try {
-      const secret = this.config.get<string>('app.jwt.secret');
-      const payload = this.jwtService.verify(token, { secret });
-      request.user = payload;
-      return true;
-    } catch (err) {
-      if (err.name === 'TokenExpiredError') {
-        throw new UnauthorizedException({
-          code: 'AUTH_TOKEN_EXPIRED',
-          message: 'Access Token이 만료되었습니다. Refresh Token으로 갱신하세요.',
-        });
-      }
-      throw new UnauthorizedException({
-        code: 'AUTH_TOKEN_INVALID',
-        message: '유효하지 않거나 변조된 토큰입니다.',
-      });
-    }
+    // TODO: JWT 검증 로직 구현 (JwtService.verify)
+    // 검증 성공 시: request.user = decoded payload
+    // 만료 시: AUTH_TOKEN_EXPIRED 에러
+    // 변조 시: AUTH_TOKEN_INVALID 에러
+
+    return true;
   }
 }
